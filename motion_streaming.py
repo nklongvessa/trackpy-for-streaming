@@ -10,13 +10,13 @@ import numpy as np
 import pandas as pd
 from trackpy import PandasHDFStoreSingleNode
 
-def emsd_stream(savepath, mpp, fps, nlagtime, max_lagtime, framejump = 10, pos_columns=None):
+def emsd_stream(path, mpp, fps, nlagtime, max_lagtime, framejump = 10, pos_columns=None):
     """Compute the mean displacement and mean squared displacement of one
     trajectory over a range of time intervals for the streaming function.
 
     Parameters
     ----------
-    savepath : string path of the trajectory .h5
+    path : string path of the trajectory .h5
     mpp : microns per pixel
     fps : frames per second
     nlagtime : number of lagtime to which MSD is computed 
@@ -43,7 +43,7 @@ def emsd_stream(savepath, mpp, fps, nlagtime, max_lagtime, framejump = 10, pos_c
     lagtime = np.unique(np.append(np.arange(1,fps),(np.logspace(0,np.log10(max_lagtime/fps),nlagtime-fps)*fps).astype(int)))
     
     
-    with PandasHDFStoreSingleNode(savepath) as traj: 
+    with PandasHDFStoreSingleNode(path) as traj: 
         Nframe = traj.max_frame # get number of frames
         
         result = pd.DataFrame(index = lagtime, columns = result_columns) # initialize the result Dataframe
@@ -72,12 +72,12 @@ def emsd_stream(savepath, mpp, fps, nlagtime, max_lagtime, framejump = 10, pos_c
         return result
     
     
-def compute_drift_stream(savepath, smoothing=0, pos_columns=None):
+def compute_drift_stream(path, smoothing=0, pos_columns=None):
     """Return the ensemble drift, xy(t).
 
     Parameters
     ----------
-    traj : DataFrame of trajectories, including columns x, y, frame, and particle
+    path : string path of the trajectory .h5
     smoothing : integer
         Smooth the drift using a forward-looking rolling mean over
         this many frames.
@@ -85,50 +85,56 @@ def compute_drift_stream(savepath, smoothing=0, pos_columns=None):
     Returns
     -------
     drift : DataFrame([x, y], index=frame)
-
-    Examples
-    --------
-    >>> compute_drift(traj).plot()
-    >>> compute_drift(traj, 0, ['x', 'y']).plot() # not smoothed, equivalent to default.
-    >>> compute_drift(traj, 15).plot() # Try various smoothing values.
-    >>> drift = compute_drift(traj, 15) # Save good drift curves.
-    >>> corrected_traj = subtract_drift(traj, drift) # Apply them.
     """
     if pos_columns is None:
         pos_columns = ['x', 'y']
-    # the groupby...diff works only if the trajectory Dataframe is sorted along frame
-    # I do here a copy because a "inplace=True" would sort the original "traj" which is perhaps unwanted/unexpected
-    traj = pandas_sort(traj, 'frame')
-    # Probe by particle, take the difference between frames.
-    delta = traj.groupby('particle', sort=False).apply(lambda x :
-                                    x.set_index('frame', drop=False).diff())
-    # Keep only deltas between frames that are consecutive.
-    delta = delta[delta['frame'] == 1]
-    # Restore the original frame column (replacing delta frame).
-    del delta['frame']
-    delta.reset_index('particle', drop=True, inplace=True)
-    delta.reset_index('frame', drop=False, inplace=True)
-    dx = delta.groupby('frame').mean()
-    if smoothing > 0:
-        dx = pd.rolling_mean(dx, smoothing, min_periods=0)
-    x = dx.cumsum(0)[pos_columns]
-    return x
-    
        
      # Drift calculation 
     print('Drift calc')
-    drift = pd.DataFrame(data = np.zeros((Nframe+1,2)),columns = ['x','y'])    # initialize drift DataFrame     
-    with tp.PandasHDFStoreSingleNode(savepath_temp.format(act)) as temp: # open temp.h5
-        for f in range(0,Nframe): # loop frame
-            frameA = temp.get(f)  # frame t
-            frameB = temp.get(f+1) # frame t+1
-            diff = frameB.set_index('particle')[pos_columns] - frameA.set_index('particle')[pos_columns]
-            drift.iloc[f+1].x = np.nanmean(diff.x.values)
-            drift.iloc[f+1].y = np.nanmean(diff.y.values) # compute drift
-        drift = np.cumsum(drift)
-        frameA = []
-        frameB = []
+    with PandasHDFStoreSingleNode(path) as traj: # open traj.h5
+        Nframe = traj.max_frame
+        dx = pd.DataFrame(data = np.zeros((Nframe+1,2)),columns = ['x','y'])    # initialize drift DataFrame     
+        
+        for f in range(Nframe): # loop frame
+            frameA = traj.get(f)  # frame t
+            frameB = traj.get(f+1) # frame t+1
+            delta = frameB.set_index('particle')[pos_columns] - frameA.set_index('particle')[pos_columns]
+            dx.iloc[f+1].x = np.nanmean(delta.x.values)
+            dx.iloc[f+1].y = np.nanmean(delta.y.values) # compute drift
+        
+        if smoothing > 0:
+            dx = pd.rolling_mean(dx, smoothing, min_periods=0)
+        x = np.cumsum(dx)
+    return x
 
 
+
+#==============================================================================
+# 
+# def subtract_drift_stream(path_old, path_new, drift=None, inplace=False):
+#     """Return a copy of particle trajectories with the overall drift subtracted
+#     out.
+# 
+#     Parameters
+#     ----------
+#     path_old : savepath .h5 before the drift substraction
+#     path_new : savepath .h5 after the drift substraction
+#     drift : optional DataFrame([x, y], index=frame) like output of
+#          compute_drift(). If no drift is passed, drift is computed from traj.
+# 
+#     Returns
+#     -------
+#     traj : a copy, having modified columns x and y
+#     """
+#     if drift is None:
+#         drift = compute_drift(traj)
+#     if not inplace:
+#         traj = traj.copy()
+#     traj.set_index('frame', inplace=True, drop=False)
+#     traj.sort_index(inplace=True)
+#     for col in drift.columns:
+#         traj[col] = traj[col].sub(drift[col], fill_value=0, level='frame')
+#     return traj
+#==============================================================================
     
     
