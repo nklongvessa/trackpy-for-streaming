@@ -67,7 +67,6 @@ def emsd_stream(path, mpp, fps, nlagtime, max_lagtime, framejump = 10, pos_colum
             result.loc[result.index == lg,result.columns[3]] = msds.msd.std() # get the std over each t0
             
         result['lagt'] = lagtime/fps
-        result.index.name = 'lagt'
           
         return result
     
@@ -109,32 +108,31 @@ def compute_drift_stream(path, smoothing=0, pos_columns=None):
 
 
 
-#==============================================================================
-# 
-# def subtract_drift_stream(path_old, path_new, drift=None, inplace=False):
-#     """Return a copy of particle trajectories with the overall drift subtracted
-#     out.
-# 
-#     Parameters
-#     ----------
-#     path_old : savepath .h5 before the drift substraction
-#     path_new : savepath .h5 after the drift substraction
-#     drift : optional DataFrame([x, y], index=frame) like output of
-#          compute_drift(). If no drift is passed, drift is computed from traj.
-# 
-#     Returns
-#     -------
-#     traj : a copy, having modified columns x and y
-#     """
-#     if drift is None:
-#         drift = compute_drift(traj)
-#     if not inplace:
-#         traj = traj.copy()
-#     traj.set_index('frame', inplace=True, drop=False)
-#     traj.sort_index(inplace=True)
-#     for col in drift.columns:
-#         traj[col] = traj[col].sub(drift[col], fill_value=0, level='frame')
-#     return traj
-#==============================================================================
-    
-    
+
+def subtract_drift_stream(path_old, path_new, drift=None):
+    """Return a copy of particle trajectories with the overall drift subtracted
+    out.
+
+    Parameters
+    ----------
+    path_old : savepath .h5 before the drift substraction
+    path_new : savepath .h5 after the drift substraction
+    drift : optional DataFrame([x, y], index=frame) like output of
+         compute_drift(). If no drift is passed, drift is computed from traj.
+
+    Returns
+    -------
+    .h5 file where indicated in path_new
+    """
+    if drift is None:
+        drift = compute_drift_stream(path_old)
+
+    with PandasHDFStoreSingleNode(path_old) as traj_old: 
+        Nframe = traj_old.max_frame
+        with PandasHDFStoreSingleNode(path_new) as traj_new: 
+            for f in range(0,Nframe+1): # loop frame
+               frame = traj_old.get(f)
+               frame['x'] = frame['x'].sub(drift['x'][f])
+               frame['y'] = frame['y'].sub(drift['y'][f])
+               traj_new.put(frame) # put in the new file 
+                                     
